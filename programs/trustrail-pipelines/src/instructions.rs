@@ -1,5 +1,2 @@
-pub mod initialize;
-pub mod increment;
-
-pub use initialize::*;
-pub use increment::*;
+pub mod create_commitment;
+pub use create_commitment::*;

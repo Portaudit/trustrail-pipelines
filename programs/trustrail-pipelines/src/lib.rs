@@ -21,4 +21,25 @@ pub mod trustrail_pipelines {
         instructions::create_commitment::handler(
             ctx, task_id, executor_agent, input_amount, min_output_amount, deadline_slot)
     }
+
+    pub fn submit_proof(
+        ctx: Context<SubmitProof>,
+        proof_tx: [u8; 64],
+        proof_slot: u64,
+        claimed_actual_output: u64,
+    ) -> Result<()> {
+        instructions::submit_proof::handler(ctx, proof_tx, proof_slot, claimed_actual_output)
+    }
+
+    pub fn release(ctx: Context<Release>) -> Result<()> {
+        instructions::release::handler(ctx)
+    }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        instructions::refund::handler(ctx)
+    }
+
+    pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
+        instructions::cancel::handler(ctx)
+    }
 }

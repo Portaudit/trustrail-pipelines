@@ -17,9 +17,10 @@ pub mod trustrail_pipelines {
         input_amount: u64,
         min_output_amount: u64,
         deadline_slot: u64,
+        expected_staging_ata: Pubkey,
     ) -> Result<()> {
         instructions::create_commitment::handler(
-            ctx, task_id, executor_agent, input_amount, min_output_amount, deadline_slot)
+            ctx, task_id, executor_agent, input_amount, min_output_amount, deadline_slot, expected_staging_ata)
     }
 
     pub fn submit_proof(
@@ -41,5 +42,9 @@ pub mod trustrail_pipelines {
 
     pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
         instructions::cancel::handler(ctx)
+    }
+
+    pub fn withdraw_for_swap(ctx: Context<WithdrawForSwap>) -> Result<()> {
+        instructions::withdraw_for_swap::handler(ctx)
     }
 }

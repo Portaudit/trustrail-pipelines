@@ -3,6 +3,7 @@ pub mod submit_proof;
 pub mod release;
 pub mod refund;
 pub mod cancel;
+pub mod withdraw_for_swap;
 
 #[allow(ambiguous_glob_reexports)]
 pub use create_commitment::*;
@@ -14,3 +15,5 @@ pub use release::*;
 pub use refund::*;
 #[allow(ambiguous_glob_reexports)]
 pub use cancel::*;
+#[allow(ambiguous_glob_reexports)]
+pub use withdraw_for_swap::*;

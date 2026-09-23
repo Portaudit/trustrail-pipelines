@@ -47,6 +47,7 @@ pub fn handler(ctx: Context<Refund>) -> Result<()> {
     let (task_id, bump) = {
         let c = &mut ctx.accounts.commitment;
         require!(c.status == CommitmentStatus::FailedSlippage, TrustRailError::WrongState);
+        require!(!c.escrow_withdrawn, TrustRailError::EscrowAlreadyWithdrawn);
         c.status = CommitmentStatus::Refunded;
         (c.task_id, c.bump)
     };

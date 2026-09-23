@@ -17,6 +17,7 @@ import {
   mintTo,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
+import { existsSync } from "fs";
 import { PROGRAM_ID, sighash, u64LE, commitmentPda, explorerTx, explorerAddr } from "./shared";
 
 async function main() {
@@ -39,6 +40,29 @@ async function main() {
   console.log("minting 1_000_000 input tokens to payer_input_ata...");
   await mintTo(connection, payer, inputMint, payerInputAta.address, payer, 1_000_000);
 
+  // Dedicated authority for the swap-staging ATA. Generated once and reused
+  // across runs (not per-commitment) — escrow_withdrawn funds land here
+  // pending the actual swap, so this keypair only needs to exist, never sign
+  // anything in create_commitment itself.
+  const stagingKeypairPath = "swap-staging-keypair.json";
+  let stagingAuthority: Keypair;
+  if (existsSync(stagingKeypairPath)) {
+    stagingAuthority = Keypair.fromSecretKey(
+      Buffer.from(JSON.parse(readFileSync(stagingKeypairPath, "utf-8")))
+    );
+    console.log("swap-staging authority (loaded):", stagingAuthority.publicKey.toBase58());
+  } else {
+    stagingAuthority = Keypair.generate();
+    writeFileSync(stagingKeypairPath, JSON.stringify(Array.from(stagingAuthority.secretKey)));
+    console.log("swap-staging authority (generated, saved to worker/swap-staging-keypair.json):", stagingAuthority.publicKey.toBase58());
+  }
+
+  console.log("creating swap_staging_ata (input_mint, owned by swap-staging authority)...");
+  const swapStagingAta = await getOrCreateAssociatedTokenAccount(
+    connection, payer, inputMint, stagingAuthority.publicKey
+  );
+  console.log("swap_staging_ata:", swapStagingAta.address.toBase58());
+
   const taskId = randomBytes(32);
   const [commitment] = commitmentPda(taskId);
   const escrowAta = getAssociatedTokenAddressSync(inputMint, commitment, true);
@@ -50,6 +74,12 @@ async function main() {
   const inputAmount = 1_000_000n;
   const minOutputAmount = 500_000n;
 
+  // Byte layout must match the Rust handler's parameter order exactly:
+  // task_id, executor_agent, input_amount, min_output_amount, deadline_slot,
+  // expected_staging_ata. expected_staging_ata is a raw Pubkey (32 bytes,
+  // no length prefix) — unlike a Vec/String field, it is NOT length-prefixed.
+  // Getting this order or length wrong fails at the RPC level with a
+  // generic "instruction data length" error, not an account-constraint one.
   const data = Buffer.concat([
     sighash("create_commitment"),
     taskId,
@@ -57,6 +87,7 @@ async function main() {
     u64LE(inputAmount),
     u64LE(minOutputAmount),
     u64LE(deadlineSlot),
+    swapStagingAta.address.toBuffer(),
   ]);
 
   const ix = new TransactionInstruction({
@@ -94,6 +125,7 @@ async function main() {
       outputAta: outputAta.toBase58(),
       outputMint: outputMint.toBase58(),
       minOutputAmount: minOutputAmount.toString(),
+      swapStagingAta: swapStagingAta.address.toBase58(),
     }, null, 2)
   );
   console.log("\nsaved to worker/last-commitment.json");

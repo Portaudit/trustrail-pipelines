@@ -41,6 +41,7 @@ pub fn handler(
     input_amount: u64,
     min_output_amount: u64,
     deadline_slot: u64,
+    expected_staging_ata: Pubkey,
 ) -> Result<()> {
     require!(input_amount > 0 && min_output_amount > 0, TrustRailError::WrongState);
 
@@ -59,6 +60,8 @@ pub fn handler(
     c.verified = false;
     c.status = CommitmentStatus::Locked;
     c.bump = ctx.bumps.commitment;
+    c.escrow_withdrawn = false;
+    c.expected_staging_ata = expected_staging_ata;
 
     token::transfer(
         CpiContext::new(

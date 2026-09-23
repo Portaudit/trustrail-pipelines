@@ -8,9 +8,10 @@ skip-lint = false
 
 [programs.localnet]
 trustrail_pipelines = "CgXidrtsV5nLkjPCYhZUPUuZUpmvekMKvDN9uh3ucoC8"
+mock_swap = "3qqN3ZXc1SPEtDLdn9Ek68r9YtDc1mBVgdhS7r48d9vJ"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

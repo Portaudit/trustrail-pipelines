@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes } from "crypto";
 import {
   Connection,
@@ -17,8 +17,10 @@ import {
   mintTo,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { existsSync } from "fs";
 import { PROGRAM_ID, sighash, u64LE, commitmentPda, explorerTx, explorerAddr } from "./shared";
+import { createStagingAccount } from "./mock-swap";
+
+const MINTS_PATH = "mints.json";
 
 async function main() {
   const connection = new Connection("https://api.devnet.solana.com", "confirmed");
@@ -30,56 +32,57 @@ async function main() {
   writeFileSync("executor-keypair.json", JSON.stringify(Array.from(executor.secretKey)));
   console.log("executor pubkey:", executor.publicKey.toBase58(), "(saved to worker/executor-keypair.json)");
 
-  console.log("creating input mint...");
-  const inputMint = await createMint(connection, payer, payer.publicKey, null, 6);
-  console.log("creating output mint...");
-  const outputMint = await createMint(connection, payer, payer.publicKey, null, 6);
-  console.log("input_mint:", inputMint.toBase58(), "output_mint:", outputMint.toBase58());
+  // Fixed-mint model: input_mint/output_mint are created ONCE and persisted to
+  // mints.json, load-if-exists — so create-commitment.ts and
+  // initialize-mock-pool.ts can't disagree about which mint they mean.
+  let inputMint: PublicKey;
+  let outputMint: PublicKey;
+  if (existsSync(MINTS_PATH)) {
+    const mints = JSON.parse(readFileSync(MINTS_PATH, "utf-8"));
+    inputMint = new PublicKey(mints.inputMint);
+    outputMint = new PublicKey(mints.outputMint);
+    console.log("mints (loaded from mints.json):");
+    console.log("  input_mint:", inputMint.toBase58());
+    console.log("  output_mint:", outputMint.toBase58());
+  } else {
+    console.log("no mints.json found — creating input/output mints for the first time...");
+    inputMint = await createMint(connection, payer, payer.publicKey, null, 6);
+    outputMint = await createMint(connection, payer, payer.publicKey, null, 6);
+    console.log("input_mint:", inputMint.toBase58(), "output_mint:", outputMint.toBase58());
+    writeFileSync(
+      MINTS_PATH,
+      JSON.stringify({
+        inputMint: inputMint.toBase58(),
+        outputMint: outputMint.toBase58(),
+        mintAuthority: payer.publicKey.toBase58(),
+      }, null, 2)
+    );
+    console.log("saved to worker/mints.json — later runs (and initialize-mock-pool.ts) will reuse these, not create new ones");
+  }
 
   const payerInputAta = await getOrCreateAssociatedTokenAccount(connection, payer, inputMint, payer.publicKey);
   console.log("minting 1_000_000 input tokens to payer_input_ata...");
   await mintTo(connection, payer, inputMint, payerInputAta.address, payer, 1_000_000);
 
-  // Dedicated authority for the swap-staging ATA. Generated once and reused
-  // across runs (not per-commitment) — escrow_withdrawn funds land here
-  // pending the actual swap, so this keypair only needs to exist, never sign
-  // anything in create_commitment itself.
-  const stagingKeypairPath = "swap-staging-keypair.json";
-  let stagingAuthority: Keypair;
-  if (existsSync(stagingKeypairPath)) {
-    stagingAuthority = Keypair.fromSecretKey(
-      Buffer.from(JSON.parse(readFileSync(stagingKeypairPath, "utf-8")))
-    );
-    console.log("swap-staging authority (loaded):", stagingAuthority.publicKey.toBase58());
-  } else {
-    stagingAuthority = Keypair.generate();
-    writeFileSync(stagingKeypairPath, JSON.stringify(Array.from(stagingAuthority.secretKey)));
-    console.log("swap-staging authority (generated, saved to worker/swap-staging-keypair.json):", stagingAuthority.publicKey.toBase58());
-  }
-
-  console.log("creating swap_staging_ata (input_mint, owned by swap-staging authority)...");
-  const swapStagingAta = await getOrCreateAssociatedTokenAccount(
-    connection, payer, inputMint, stagingAuthority.publicKey
-  );
-  console.log("swap_staging_ata:", swapStagingAta.address.toBase58());
-
+  // Under the fixed-mint model, task_id is now the ONLY thing that varies
+  // between test commitments. Commitment PDAs derive from task_id alone, so
+  // distinct task_ids still give fully independent commitments/escrows.
   const taskId = randomBytes(32);
+  const taskIdHex = taskId.toString("hex");
+
+  console.log("creating per-commitment swap staging account (task_id:", taskIdHex, ")...");
+  const { stagingAta } = await createStagingAccount(connection, payer, inputMint, taskIdHex);
+
   const [commitment] = commitmentPda(taskId);
   const escrowAta = getAssociatedTokenAddressSync(inputMint, commitment, true);
   const outputAta = getAssociatedTokenAddressSync(outputMint, commitment, true);
 
   const currentSlot = await connection.getSlot();
-  const deadlineSlot = currentSlot + 5000; // ~a few hours of buffer at ~2 slots/sec
+  const deadlineSlot = currentSlot + 5000;
 
   const inputAmount = 1_000_000n;
   const minOutputAmount = 500_000n;
 
-  // Byte layout must match the Rust handler's parameter order exactly:
-  // task_id, executor_agent, input_amount, min_output_amount, deadline_slot,
-  // expected_staging_ata. expected_staging_ata is a raw Pubkey (32 bytes,
-  // no length prefix) — unlike a Vec/String field, it is NOT length-prefixed.
-  // Getting this order or length wrong fails at the RPC level with a
-  // generic "instruction data length" error, not an account-constraint one.
   const data = Buffer.concat([
     sighash("create_commitment"),
     taskId,
@@ -87,7 +90,7 @@ async function main() {
     u64LE(inputAmount),
     u64LE(minOutputAmount),
     u64LE(deadlineSlot),
-    swapStagingAta.address.toBuffer(),
+    stagingAta.toBuffer(),
   ]);
 
   const ix = new TransactionInstruction({
@@ -115,21 +118,23 @@ async function main() {
   console.log("tx:", explorerTx(sig));
   console.log("commitment PDA:", commitment.toBase58(), explorerAddr(commitment.toBase58()));
   console.log("output_ata:", outputAta.toBase58());
-  console.log("task_id (hex):", taskId.toString("hex"));
+  console.log("task_id (hex):", taskIdHex);
 
   writeFileSync(
     "last-commitment.json",
     JSON.stringify({
-      taskId: taskId.toString("hex"),
+      taskId: taskIdHex,
       commitment: commitment.toBase58(),
+      inputMint: inputMint.toBase58(),
+      escrowAta: escrowAta.toBase58(),
       outputAta: outputAta.toBase58(),
       outputMint: outputMint.toBase58(),
       minOutputAmount: minOutputAmount.toString(),
-      swapStagingAta: swapStagingAta.address.toBase58(),
+      swapStagingAta: stagingAta.toBase58(),
     }, null, 2)
   );
   console.log("\nsaved to worker/last-commitment.json");
-  console.log("next: mint devnet tokens into output_ata to stand in for the swap, then run submit-proof");
+  console.log("next: run withdraw-for-swap, then executeMockSwap, then submit-proof");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

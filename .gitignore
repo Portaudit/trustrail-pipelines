@@ -8,3 +8,6 @@ test-ledger
 .surfpool
 worker/*-keypair.json
 worker/last-commitment.json
+worker/mints.json
+worker/mock-pool-state.json
+worker/swap-staging-keypair-*.json

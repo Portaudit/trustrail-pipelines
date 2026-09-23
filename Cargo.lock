@@ -1769,6 +1769,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-swap"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+]
+
+[[package]]
 name = "num"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

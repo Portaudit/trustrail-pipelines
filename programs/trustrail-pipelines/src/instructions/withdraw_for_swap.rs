@@ -22,7 +22,7 @@ pub struct WithdrawForSwap<'info> {
     #[account(
         mut,
         constraint = swap_staging_ata.key() == commitment.expected_staging_ata @ TrustRailError::StagingAtaMismatch,
-        constraint = swap_staging_ata.mint == escrow_ata.mint @ TrustRailError::MintMismatch,
+        constraint = swap_staging_ata.mint == escrow_ata.mint @ TrustRailError::StagingAtaMintMismatch,
     )]
     pub swap_staging_ata: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,

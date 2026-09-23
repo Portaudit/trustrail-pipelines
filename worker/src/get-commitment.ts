@@ -47,6 +47,8 @@ async function main() {
   const verified = c.bool();
   const statusByte = c.u8();
   const bump = c.u8();
+  const escrowWithdrawn = c.bool();
+  const expectedStagingAta = c.pubkey();
 
   console.log({
     taskId: Buffer.from(taskId).toString("hex"),
@@ -63,6 +65,8 @@ async function main() {
     verified,
     status: STATUS_NAMES[statusByte] ?? `unknown byte: ${statusByte}`,
     bump,
+    escrowWithdrawn,
+    expectedStagingAta: expectedStagingAta.toBase58(),
   });
 }
 

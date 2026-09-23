@@ -3,6 +3,9 @@
   "private": true,
   "scripts": {
     "create-commitment": "tsx src/create-commitment.ts",
+    "withdraw-for-swap": "tsx src/withdraw-for-swap.ts",
+    "initialize-mock-pool": "tsx src/initialize-mock-pool.ts",
+    "execute-mock-swap": "tsx src/execute-mock-swap.ts",
     "submit-proof": "tsx src/submit-proof.ts",
     "get-commitment": "tsx src/get-commitment.ts"
   },

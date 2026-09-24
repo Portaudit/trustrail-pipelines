@@ -15,6 +15,11 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "cargo test"
+# tests-litesvm is a separate, standalone Cargo workspace (see root
+# Cargo.toml's [workspace] exclude) — its own Cargo.lock, isolated from
+# this one so litesvm's dev-dependencies can't affect `anchor build` again.
+# Requires target/deploy/trustrail_pipelines.so to already exist, i.e. run
+# `anchor build` first.
+test = "cargo test --manifest-path tests-litesvm/Cargo.toml"
 
 [hooks]

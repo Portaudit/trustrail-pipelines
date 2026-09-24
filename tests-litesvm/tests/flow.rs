@@ -52,9 +52,13 @@ struct Setup {
 
 fn setup() -> Setup {
     let mut svm = LiteSVM::new();
+    // Path is 2 levels up from tests-litesvm/tests/ to the repo root, then
+    // into target/deploy/ — same .so anchor build produces in the anchor
+    // workspace; this crate's own (separate) build graph never touches it,
+    // it's just read as bytes.
     svm.add_program(
         PROGRAM_ID,
-        include_bytes!("../../../target/deploy/trustrail_pipelines.so"),
+        include_bytes!("../../target/deploy/trustrail_pipelines.so"),
     )
     .expect("add_program failed");
 
@@ -124,9 +128,16 @@ fn create_commitment(
     let escrow_ata = get_associated_token_address(&commitment_pda, &s.input_mint);
     let output_ata = get_associated_token_address(&commitment_pda, &s.output_mint);
 
+    // create_commitment has taken 6 args since the escrow-withdrawal safety
+    // layer (commit 436e494) added expected_staging_ata as the last param.
+    // This test file wasn't updated then — a 5-tuple here silently short-fed
+    // Anchor's deserializer. These tests never exercise withdraw_for_swap, so
+    // any valid Pubkey works as the placeholder; using a fresh unique one
+    // rather than Pubkey::default() so it can't collide with a real account.
+    let expected_staging_ata = Pubkey::new_unique();
     let data = ix_data(
         "create_commitment",
-        (task_id, s.executor.pubkey(), input_amount, min_output_amount, 1_000_000u64),
+        (task_id, s.executor.pubkey(), input_amount, min_output_amount, 1_000_000u64, expected_staging_ata),
     );
 
     let accounts = vec![
@@ -239,6 +250,16 @@ fn submit_proof_second_call_rejected() {
     let (commitment_pda, output_ata) = create_commitment(&mut s, [6u8; 32], 1000, 500).unwrap();
     fund_output_ata(&mut s, &output_ata, 600);
     submit_proof(&mut s, commitment_pda, output_ata, 600).unwrap();
+
+    // Ed25519 signing is deterministic: identical instruction + identical
+    // blockhash produces byte-identical message and therefore an identical
+    // signature. litesvm 0.16's transaction-history dedup then rejects the
+    // second send as AlreadyProcessed before it ever reaches the program —
+    // that's a litesvm-level replay guard, not the on-chain WrongState guard
+    // this test is actually meant to exercise. Expiring the blockhash first
+    // makes the second transaction genuinely distinct, so it reaches
+    // submit_proof's own status check instead of being caught earlier.
+    s.svm.expire_blockhash();
     let err = submit_proof(&mut s, commitment_pda, output_ata, 600).unwrap_err();
     assert!(err.to_lowercase().contains("wrongstate"), "got: {err}");
 }

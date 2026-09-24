@@ -1,0 +1,40 @@
+[package]
+name = "trustrail-litesvm-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This crate is intentionally NOT listed in the root Cargo.toml's
+# [workspace] members, and the root Cargo.toml excludes it explicitly.
+# That gives it its own independent Cargo.lock, generated the first time
+# `cargo test` runs here — isolating litesvm's dev-dependency graph from
+# `anchor build`'s resolution entirely. See the comment in the root
+# Cargo.toml's [workspace] table for why this matters.
+#
+# The path dependency below pulls in trustrail-pipelines's lib target
+# (state::Commitment, ID) for host-side use in tests. This does NOT make
+# trustrail-pipelines part of THIS workspace — Cargo compiles it fresh here
+# under this crate's own resolved dependency versions, independently of
+# however the anchor workspace resolves it for the actual on-chain build.
+# The on-chain .so bytes themselves still come from the anchor workspace's
+# own `anchor build` output via include_bytes! in tests/flow.rs — this path
+# dependency is only for the plain Rust type definitions, not the program binary.
+
+[dependencies]
+trustrail-pipelines = { path = "../programs/trustrail-pipelines" }
+
+[dev-dependencies]
+# anchor-lang lives here, not [dependencies] above — this crate has no
+# library code of its own, only the integration test in tests/flow.rs, so
+# everything that test needs (including anchor-lang's helper re-exports)
+# is a dev-dependency. trustrail-pipelines itself stays in [dependencies]
+# since it's the thing under test, not a testing tool.
+anchor-lang = "1.2.0"
+litesvm = "0.16.0"
+solana-message = "4.2.4"
+solana-transaction = "4.1.5"
+solana-signer = "3.0.1"
+solana-keypair = "3.1.2"
+spl-token = "9.0.0"
+spl-associated-token-account = "8.0.0"
+sha2 = "0.10"

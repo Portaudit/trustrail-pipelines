@@ -49,22 +49,24 @@ reached. It is effectively dead code today. Left in place rather than removed,
 since it documents original intent and may become reachable if `submit_proof`'s
 guard ordering changes.
 
-## Local `litesvm` integration test suite (`tests/flow.rs`) is currently broken
+## Local `litesvm` integration test suite (`tests/flow.rs`) -- resolved
 
-The in-process integration tests in `programs/trustrail-pipelines/tests/flow.rs`
-(covering `create_commitment` and `submit_proof` happy/unhappy paths) currently fail
-at setup with `add_program failed: Instruction(InvalidAccountData)`. Root cause,
-confirmed against a real upstream issue: the pinned `litesvm = "0.10.0"` cannot
-parse the sBPFv3 ELF format emitted by the current build toolchain (same failure
-class as [brimigs/anchor-litesvm#3](https://github.com/brimigs/anchor-litesvm/issues/3)).
-Confirmed **not** a devnet-affecting issue — it is purely a local test-harness
-incompatibility. A trial upgrade to `litesvm = "0.16"` fixes the ELF-parsing issue
-but surfaces a separate multi-crate `solana-*` dependency version conflict
-(`solana-transaction` 3.1.0 vs 4.1.6) that requires bumping several `solana-*`
-dev-dependencies in lockstep. Deferred: real on-chain devnet verification (see repo
-README / commit history for explorer links) already independently covers both the
-`Passed` and `FailedSlippage` paths this test suite is meant to check, so this was
-not treated as blocking before the September 28, 2026 gate.
+Was broken: the in-process integration tests failed at setup with
+`add_program failed: Instruction(InvalidAccountData)`, because the pinned
+`litesvm = "0.10.0"` could not parse the sBPFv3 ELF format emitted by the
+current build toolchain (same failure class as
+[brimigs/anchor-litesvm#3](https://github.com/brimigs/anchor-litesvm/issues/3)).
+
+Fix: `litesvm` bumped to `0.16.0`. An initial attempt at this bump in place
+broke `anchor build`'s IDL-generation step instead -- `anchor build` resolves
+the entire anchor workspace's unified `Cargo.lock`, so the dependency bump
+reached it too, hitting the same underlying rustc/`maybe_uninit_write_slice`
+issue on a different surface. Resolved properly by moving the litesvm tests
+into `tests-litesvm/`, a separate Cargo workspace (own `Cargo.lock`, excluded
+from the root `[workspace]`) whose dev-dependencies can never again reach
+`anchor build`'s resolution. Verified: `cd tests-litesvm && cargo test`
+(6/6 pass) and `anchor build` from root (exit 0, no `tests-litesvm`
+involvement) both pass independently.
 
 ## Fixed-mint model / commitment independence
 

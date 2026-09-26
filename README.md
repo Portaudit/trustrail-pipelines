@@ -99,3 +99,9 @@ commitment [`HAi7f8Qf5AsJCSre5ruqMZQ6RchLG6TTuUPKogHMyiPA`](https://explorer.sol
   the mock swap venue's scope, a stuck-funds gap after `withdraw_for_swap`, and
   other known gaps.
 - [`docs/SCHEMA.md`](docs/SCHEMA.md) — account layouts.
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+Copyright © 2026 Ishvir and Company (Pty) Ltd

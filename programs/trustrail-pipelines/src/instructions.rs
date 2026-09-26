@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod create_commitment;
 pub mod submit_proof;
 pub mod release;

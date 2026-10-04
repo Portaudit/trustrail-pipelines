@@ -1,3 +1,4 @@
+import { getConnection } from "./rpc";
 import { readFileSync } from "fs";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import * as os from "os";
@@ -5,7 +6,7 @@ import * as path from "path";
 import { executeMockSwap } from "./mock-swap";
 
 async function main() {
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = getConnection();
   const last = JSON.parse(readFileSync("last-commitment.json", "utf-8"));
   const taskId = last.taskId;
   const stagingAta = new PublicKey(last.swapStagingAta);

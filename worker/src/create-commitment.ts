@@ -1,3 +1,4 @@
+import { getConnection } from "./rpc";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes } from "crypto";
 import {
@@ -23,7 +24,7 @@ import { createStagingAccount } from "./mock-swap";
 const MINTS_PATH = "mints.json";
 
 async function main() {
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = getConnection();
   const payer = Keypair.fromSecretKey(
     Buffer.from(JSON.parse(readFileSync(process.env.HOME + "/.config/solana/id.json", "utf-8")))
   );

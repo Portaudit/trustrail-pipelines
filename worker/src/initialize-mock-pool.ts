@@ -1,3 +1,4 @@
+import { getConnection } from "./rpc";
 // One-time setup: creates the mock pool's vaults and seeds output liquidity.
 // Run ONCE, AFTER create-commitment.ts has run at least once (that's what
 // creates worker/mints.json).
@@ -18,7 +19,7 @@ const MOCK_SWAP_PROGRAM_ID = new PublicKey("3qqN3ZXc1SPEtDLdn9Ek68r9YtDc1mBVgdhS
 const MINTS_PATH = "mints.json";
 
 async function main() {
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = getConnection();
 
   const payer = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(fs.readFileSync(process.env.HOME + "/.config/solana/id.json", "utf-8")))

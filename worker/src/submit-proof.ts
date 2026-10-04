@@ -1,3 +1,4 @@
+import { getConnection } from "./rpc";
 import { readFileSync } from "fs";
 import { randomBytes } from "crypto";
 import {
@@ -12,7 +13,7 @@ import { getAccount } from "@solana/spl-token";
 import { PROGRAM_ID, sighash, u64LE, explorerTx } from "./shared";
 
 async function main() {
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = getConnection();
   const payer = Keypair.fromSecretKey(
     Buffer.from(JSON.parse(readFileSync(process.env.HOME + "/.config/solana/id.json", "utf-8")))
   );

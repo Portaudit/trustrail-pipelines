@@ -1,3 +1,4 @@
+import { getConnection } from "./rpc";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const STATUS_NAMES = ["Locked", "Passed", "FailedSlippage", "Released", "Refunded", "TimedOut"];
@@ -23,7 +24,7 @@ async function main() {
     process.exit(1);
   }
 
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = getConnection();
   const info = await connection.getAccountInfo(new PublicKey(address));
   if (!info) {
     console.error("account not found");

@@ -29,55 +29,122 @@ integration.
 
 ## Stuck-funds gap after `withdraw_for_swap`
 
-Once `withdraw_for_swap` succeeds, `escrow_withdrawn` is set to `true` and the
-`Commitment`'s escrow account is empty; the input tokens now live in
-`swap_staging_ata`, owned by a per-commitment staging keypair. By their source,
-`refund` and `cancel` both require `!escrow_withdrawn`, so neither can act on
-this state.
+Once `withdraw_for_swap` succeeds, `escrow_withdrawn` is `true` and the
+`Commitment`'s escrow account is empty; the input tokens live in the swap staging
+account. By their source, `refund` and `cancel` both require `!escrow_withdrawn`,
+so neither can act on that state. The `recover` instruction handles it.
 
-Status as of the program upgrade at slot 507558273 (`trustrail_pipelines`).
+Deployed program (devnet): `CgXidrtsV5nLkjPCYhZUPUuZUpmvekMKvDN9uh3ucoC8`, source
+commit `457165a`, last deployed slot 507592632, upgrade tx `3NjV86VemtvZCHYRegmJwvMACcQ7CNHqbYep6HkuoBACKtJhzFE7wSzsfQinpWFJHD84X4nZbUsKo35HnrkrmC4x`. Binary:
+264880 bytes, sha256
+`c4c5421712552c1c864e85c07539c6fc7297989cdee056bd4ad551aadbbb7e0d`. Provenance is
+by file timestamps and a dump-hash check after the upgrade; this is not a
+reproducible-build claim.
 
-### Closed, verified on devnet: FailedSlippage with the escrow withdrawn
+### What the program does now
 
-The `recover` instruction handles this state. It returns the proceeds left in the
-commitment's output account to the payer and closes the commitment's escrow and
-output accounts. It returns the swap output token only, not the original input,
-so it is recovery of stuck proceeds, not a refund.
+- **`recover`, FailedSlippage with the escrow withdrawn.** No deadline. It
+  returns the swap output left in the commitment's output account (and any input
+  left in escrow or staging) to the payer and closes the commitment's escrow and
+  output accounts. When only swap output comes back, this is recovery of stuck
+  proceeds, not a refund.
+- **`recover`, Locked with the escrow withdrawn and no proof stamped.** Only when
+  the current slot is strictly after `deadline_slot`. Before that it fails
+  `DeadlineNotReached` (6005, 0x1775). Any other state fails `WrongState` (6000);
+  the `WrongState` check runs first.
+- **`withdraw_for_swap` guard.** Before moving funds it requires the staging
+  account to be pullable by the commitment: staging owned by the commitment PDA,
+  or the commitment PDA as delegate with an allowance of at least the escrow
+  amount. Otherwise it fails `StagingNotPullable` (6011, 0x177B) and nothing moves.
+- **Worker.** Each new staging account approves the commitment PDA as delegate
+  for `u64::MAX`, and the worker checks the readback. The allowance is "approved
+  for `u64::MAX`", not a fixed balance: delegate pulls reduce it, and owner
+  transfers do not change it. Evidence: litesvm test B6, and on devnet staging
+  `FsHyhXq2P3kmyqeo8urbyxiTm9Gsi3vVpmsFeTwitPNL` shows 18446744073709301615
+  after a 250000 pull.
 
-It was run once on devnet against Run B (commitment
-`HAi7f8Qf5AsJCSre5ruqMZQ6RchLG6TTuUPKogHMyiPA`), signed by a settler that is not
-the payer. Before: escrow 0, output 300000, staging 0. After: status Recovered,
-escrow and output accounts closed, staging 0, payer output account 300000, payer
-input account unchanged. Recover tx
-`2LZ3VqM99NPCW5bDeSjXxfQVm2P5WvLUpY6Y6CEv4G5UjftGHtPsbTMZWsfb96cK5t2V91LZhbuCWzufahpr4R2C`.
-Run B's five original transactions are unchanged.
+### Verified on devnet
+
+All signatures below were confirmed finalized. Addresses are commitments.
+
+- **Run B** (FailedSlippage, escrow withdrawn): recovered by a settler that is
+  not the payer. Before: escrow 0, output 300000, staging 0. After: status
+  Recovered, escrow and output accounts closed, staging 0, payer output account
+  300000, payer input unchanged. Commitment
+  `HAi7f8Qf5AsJCSre5ruqMZQ6RchLG6TTuUPKogHMyiPA`, recover tx
+  `2LZ3VqM99NPCW5bDeSjXxfQVm2P5WvLUpY6Y6CEv4G5UjftGHtPsbTMZWsfb96cK5t2V91LZhbuCWzufahpr4R2C`.
+- **Run C** (`4ywZV4cW67iic82FcY3bcxzPamvczxeMXx88ep9tAFFu`): input 250000,
+  minimum output 500000, 900-slot deadline (create landed in slot 507593103,
+  deadline 507593999). The staging key was moved out of the worker folder first.
+  `withdraw_for_swap` moved 250000 from escrow to staging. An early `recover` at
+  slot 507593356 failed `0x1775` and changed nothing. After the deadline, a
+  settler that is not the payer recovered it in slot 507594044: payer input
+  700000 to 950000, escrow and output closed, staging 0, status Recovered, with
+  no worker key involved. A second `recover` failed `AccountNotInitialized`
+  (3012, 0xbc4) on the escrow account, and the status stayed Recovered.
+  - create `2dJPE5YxrYGD4b5dQe8S7xJJb5x3VGUhhN7fURaG9TWCQLrbrA7WzRPfWZ6LGooN7R4RJdvLUNMHeT3pB8rrXMPM`
+  - withdraw `5FX7Zx2DjYx4fj5ZY9rfn6U64c7UiQjv7iJCeUTJghTKNYKL9mKpyr2BQMPaj2YdQTp7rRwF7GB1dLvQr6t6pQaE`
+  - recover `5ZuvUcFtCuzqVnFGJZDJWVF5biQFGVrQHBdUse9UnzS4kG57P8431GrKL4JV1bNW3utXM1KbBKCJtzb7jUNUoUVi`
+- **Run C2** (`ByYUeb7Fr2nbLpf6n75dgK5oq2WttUhMBDxqe3it2eXV`): input 200000,
+  minimum output 500000, 1500-slot deadline. The staging key revoked the
+  delegate; `withdraw_for_swap` then failed `StagingNotPullable` (0x177B) in
+  simulation, so nothing was sent and escrow still held 200000. After the
+  deadline, `cancel` by a settler that is not the payer (slot 507596533): escrow
+  200000 to closed, payer input 950000 to 1150000, status TimedOut.
+  - create `5P4tbsW1gegpsK3fqwnRN2orp62zHtpuxddhNKS8uHM1iiUBJF6yMJtJPf9Y3RLdBvViHAC11ENC13PYnGVp8vyY`
+  - revoke `33wR5cPPjnjdMBT3uB4fZGBqLwsqKy9DhdgzyUZFwuXWzLE4cz22rCbLDAvBY6rwbnks2kRTBmzZyiuRHr7AeYnf`
+  - cancel `CaRXK5SUBowfrbU8zvr3CLtZNfyVBqU8CsfoAjnTtkosyyd1X2YJXgUxM6v8s6bPUCgGyHqbybxyWe4CZux9LfG`
+- **Run D** (`5zrxT6AdAfms6UbYKipi4AVxo4Yp4cXXNmN9RoyPhre2`): the normal path with
+  the delegate in place reached Passed. It was left unreleased on purpose. The
+  `proofTx` field in the decoded account is random bytes, not a transaction.
+  - create `LFLceLhx8KCH4CuRft7cgYnivCnZ4GxcQSt9zAbuPFwcmuVBnNtBAed2hKYCd2dxqcexBMCrSAMhoksscuNK1tY`
+  - withdraw `22YP1vqJQUtxALj1HoCkoAaaRQsZKdhpX48aaMD5zx8ZPH637CiFkRyHP6ipvY7FjdXHA7ViUBGXKpDfWmiKEPRr`
+  - swap `3NmMnH1fYnCzu3zBz2reBvq3RMNMDjaZXU97JVUpW9zCEvCt5NUVVNpUKZ1LvzgbPXQXpY3SL32oqL4NSjucbQbU`
+  - submit_proof `66LyJSn2YuSb8KmaTiBfZht91LJeTrtjKwPmg9bAxi3415zFDzBBU4GPyDBjdhcCqzCn7dMu29i1UXwnum2qvLVM`
 
 ### Still open
 
-- **Locked with the escrow withdrawn.** `recover` rejects this state with
-  `WrongState`. Handling it is planned for Slice 2.
-- **Non-empty staging account.** The worker currently creates staging accounts
-  with no delegate, so `recover` cannot pull funds out of a non-empty staging
-  account yet. The litesvm test `recover_rejects_unpullable_staging_atomically`
-  covers the failure case. The Run B recovery had an empty staging account.
+- **Legacy staging accounts.** Recovery from a non-empty staging account works
+  only for staging accounts created with the delegate (the current worker).
+  Staging accounts created without a delegate recover only if staging is empty.
+- **Hostile staging-key holder.** The key holder can revoke the delegate:
+  `withdraw_for_swap` then refuses, and if the revoke comes before the withdraw
+  the funds stay recoverable through `cancel` after the deadline (Run C2). If the
+  delegate is revoked after the withdraw, `recover` cannot pull non-empty staging
+  (`StagingNotPullable`, litesvm test B5), and the staging key holder owns that
+  account in any case. The key holder can also close the staging
+  account; that makes `recover` fail with `AccountNotInitialized` in both
+  branches. This is tested in litesvm (`recover_fails_when_staging_closed`) and
+  has not been run on devnet.
+- **Exact-amount allowance.** If the allowance is an exact amount rather than
+  `u64::MAX`, a donation into staging makes `recover` fail with
+  `StagingNotPullable`. Tested in litesvm; the worker always approves `u64::MAX`.
+- **S3 (staging remainder).** After a run reaches Passed or Released, any
+  remainder left in the swap staging account stays there. Open.
+- **S4 (donated output forces Passed).** Tokens donated into the output account
+  can push it to the minimum, so `submit_proof` records Passed while the escrow
+  is still non-empty. `release` then fails when it closes the non-empty escrow,
+  so release is locked until Slice 3 (release dust sweep). This is from reading
+  the source and has not been reproduced in a test or on devnet. Open.
+- **What Passed means.** Passed attests only that the output account held at
+  least the minimum, not that a swap happened.
+- **Legacy commitment accounts.** Three 302-byte commitment accounts on devnet
+  predate the current layout, cannot be decoded by the current program, and are
+  not covered by any recovery claim. It is not claimed that every devnet
+  commitment is recoverable.
 
 ### Limits of the evidence
 
-- The litesvm `recover` tests set commitment and token-account states directly.
-  They show how `recover` behaves from those states, not that the real
-  instruction chain reaches them. Only the devnet run on Run B shows that the real
-  chain reaches the FailedSlippage-with-withdrawn state.
-- `release`, `refund` and `cancel` exist in the program but have not been
-  exercised in the litesvm tests or in either documented devnet run (Runs A and B). Runs A and B ended Passed
-  and Recovered.
-
-### Deployed binary
-
-sha256 `7dcd90d415a6e5bf1304b127c64d0a834a4b54934b745d76650b65a20316dee5`. It was
-built locally with `anchor build` at 01:50:11 (+0200) on 2026-10-05 from the
-sources of commit `80c3d18`; no tracked source file had a later modification
-time. This is not a reproducible-build claim.
-
+- The litesvm suite (28 tests) sets some state directly. Only the devnet runs
+  show real chain behaviour.
+- `cancel` is exercised in litesvm test B7 and in devnet Run C2. `refund` and
+  `release` are not exercised in the documented devnet runs. `refund` is
+  reachable only for FailedSlippage with the escrow never withdrawn; the normal
+  worker flow withdraws first, so those runs exit through `recover`.
+- `recover.ts` and `cancel.ts` refuse a settler equal to the payer. That is a
+  script choice, not a program rule.
+- Slot rate was measured at 4.269 slots/s in one 104 s window on Oct 5, not a
+  constant.
 ## `ProofAlreadyStamped` error variant
 
 `TrustRailError::ProofAlreadyStamped` is defined but not currently reachable from

@@ -12,6 +12,7 @@ pub enum CommitmentStatus {
     Released,
     Refunded,
     TimedOut,
+    Recovered,
 }
 
 #[account]

@@ -1,7 +1,7 @@
 import { getConnection } from "./rpc";
 import { Connection, PublicKey } from "@solana/web3.js";
 
-const STATUS_NAMES = ["Locked", "Passed", "FailedSlippage", "Released", "Refunded", "TimedOut"];
+const STATUS_NAMES = ["Locked", "Passed", "FailedSlippage", "Released", "Refunded", "TimedOut", "Recovered"];
 
 class Cursor {
   offset = 0;

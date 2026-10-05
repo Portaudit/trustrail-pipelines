@@ -50,4 +50,8 @@ pub mod trustrail_pipelines {
     pub fn withdraw_for_swap(ctx: Context<WithdrawForSwap>) -> Result<()> {
         instructions::withdraw_for_swap::handler(ctx)
     }
+
+    pub fn recover(ctx: Context<Recover>) -> Result<()> {
+        instructions::recover::handler(ctx)
+    }
 }

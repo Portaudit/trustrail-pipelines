@@ -19,4 +19,8 @@ pub enum TrustRailError {
     StagingAtaMismatch,
     #[msg("Swap staging ATA mint does not match escrow mint")]
     StagingAtaMintMismatch,
+    #[msg("Swap staging account is not pullable by the commitment")]
+    StagingNotPullable,
+    #[msg("Escrow has not been withdrawn for swap")]
+    EscrowNotWithdrawn,
 }

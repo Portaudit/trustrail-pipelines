@@ -23,8 +23,24 @@ import { createStagingAccount } from "./mock-swap";
 
 const MINTS_PATH = "mints.json";
 
+const U64_MAX = 0xffffffffffffffffn;
+
+// Unset or empty -> default. Anything else must be a plain positive integer.
+function envAmount(name: string, dflt: bigint, max: bigint = U64_MAX): bigint {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return dflt;
+  if (!/^[1-9][0-9]*$/.test(raw) || BigInt(raw) > max) {
+    console.error(`${name} must be a positive integer no larger than ${max}, got: ${raw}`);
+    process.exit(1);
+  }
+  return BigInt(raw);
+}
+
 async function main() {
   const connection = getConnection();
+  const inputAmount = envAmount("INPUT_AMOUNT", 1_000_000n);
+  const minOutputAmount = envAmount("MIN_OUTPUT_AMOUNT", 500_000n);
+  const deadlineSlots = Number(envAmount("DEADLINE_SLOTS", 5000n, 1_000_000_000n));
   const payer = Keypair.fromSecretKey(
     Buffer.from(JSON.parse(readFileSync(process.env.HOME + "/.config/solana/id.json", "utf-8")))
   );
@@ -62,8 +78,8 @@ async function main() {
   }
 
   const payerInputAta = await getOrCreateAssociatedTokenAccount(connection, payer, inputMint, payer.publicKey);
-  console.log("minting 1_000_000 input tokens to payer_input_ata...");
-  await mintTo(connection, payer, inputMint, payerInputAta.address, payer, 1_000_000);
+  console.log(`minting ${inputAmount} input tokens to payer_input_ata...`);
+  await mintTo(connection, payer, inputMint, payerInputAta.address, payer, inputAmount);
 
   // Under the fixed-mint model, task_id is now the ONLY thing that varies
   // between test commitments. Commitment PDAs derive from task_id alone, so
@@ -79,10 +95,8 @@ async function main() {
   const outputAta = getAssociatedTokenAddressSync(outputMint, commitment, true);
 
   const currentSlot = await connection.getSlot();
-  const deadlineSlot = currentSlot + 5000;
+  const deadlineSlot = currentSlot + deadlineSlots;
 
-  const inputAmount = 1_000_000n;
-  const minOutputAmount = 500_000n;
 
   const data = Buffer.concat([
     sighash("create_commitment"),
@@ -131,6 +145,8 @@ async function main() {
       outputAta: outputAta.toBase58(),
       outputMint: outputMint.toBase58(),
       minOutputAmount: minOutputAmount.toString(),
+      inputAmount: inputAmount.toString(),
+      deadlineSlot,
       swapStagingAta: stagingAta.toBase58(),
     }, null, 2)
   );

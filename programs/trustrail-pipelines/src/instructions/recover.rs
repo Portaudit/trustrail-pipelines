@@ -71,12 +71,22 @@ pub struct Recover<'info> {
 pub fn handler(ctx: Context<Recover>) -> Result<()> {
     let (task_id, bump) = {
         let c = &mut ctx.accounts.commitment;
-        // Branch 2 only (Slice 1): FailedSlippage with escrow already withdrawn.
-        // Every other state, including Locked+withdrawn (S1), is WrongState.
-        require!(
-            c.status == CommitmentStatus::FailedSlippage && c.escrow_withdrawn,
-            TrustRailError::WrongState
-        );
+        // Branch 2: FailedSlippage with escrow already withdrawn, no deadline.
+        // Branch 1: Locked with escrow withdrawn and no proof stamped, only
+        // strictly after the deadline. Everything else is WrongState.
+        let branch2 = c.status == CommitmentStatus::FailedSlippage && c.escrow_withdrawn;
+        if !branch2 {
+            require!(
+                c.status == CommitmentStatus::Locked
+                    && c.escrow_withdrawn
+                    && c.proof_tx.is_none(),
+                TrustRailError::WrongState
+            );
+            require!(
+                Clock::get()?.slot > c.deadline_slot,
+                TrustRailError::DeadlineNotReached
+            );
+        }
         c.status = CommitmentStatus::Recovered;
         (c.task_id, c.bump)
     };

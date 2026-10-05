@@ -42,6 +42,21 @@ pub fn handler(ctx: Context<WithdrawForSwap>) -> Result<()> {
     let signer_seeds: &[&[&[u8]]] = &[commitment_seeds];
 
     let escrow_amount = ctx.accounts.escrow_ata.amount;
+    {
+        // The commitment must be able to pull these funds back out of staging
+        // (owner, or delegate with enough allowance) before they are moved in.
+        let st = &ctx.accounts.swap_staging_ata;
+        require!(
+            crate::instructions::recover::staging_pullable(
+                &st.owner,
+                Option::<Pubkey>::from(st.delegate),
+                st.delegated_amount,
+                &ctx.accounts.commitment.key(),
+                escrow_amount,
+            ),
+            TrustRailError::StagingNotPullable
+        );
+    }
     token::transfer(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.key(),

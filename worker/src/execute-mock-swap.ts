@@ -1,6 +1,7 @@
 import { getConnection } from "./rpc";
 import { readFileSync } from "fs";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { getAccount } from "@solana/spl-token";
 import * as os from "os";
 import * as path from "path";
 import { executeMockSwap } from "./mock-swap";
@@ -21,7 +22,13 @@ async function main() {
     Uint8Array.from(JSON.parse(readFileSync(payerPath, "utf-8")))
   );
 
-  const amountIn = 1_000_000n;
+  const stagingBalance = (await getAccount(connection, stagingAta)).amount;
+  const rawIn = process.env.AMOUNT_IN;
+  if (rawIn !== undefined && rawIn !== "" && !/^[0-9]+$/.test(rawIn)) {
+    throw new Error(`AMOUNT_IN must be a non-negative integer, got: ${rawIn}`);
+  }
+  const amountIn = rawIn ? BigInt(rawIn) : stagingBalance;
+  if (amountIn === 0n) throw new Error(`refusing to swap 0 (staging balance ${stagingBalance})`);
   console.log("running mock_swap_execute for task", taskId, "amountIn:", amountIn.toString());
   console.log("fee payer:", payer.publicKey.toBase58());
   console.log("staging authority:", stagingKeypair.publicKey.toBase58());

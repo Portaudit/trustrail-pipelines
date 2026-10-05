@@ -14,9 +14,9 @@ import {
   TransactionInstruction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import { createAccount, getAccount, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { approve, createAccount, getAccount, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import * as fs from "fs";
-import { sighash, u64LE } from "./shared";
+import { sighash, u64LE, commitmentPda } from "./shared";
 
 // Must match programs/mock-swap/src/lib.rs's declare_id!, Anchor.toml's
 // [programs.localnet] mock_swap entry, and initialize-mock-pool.ts's
@@ -53,6 +53,17 @@ export async function createStagingAccount(
   const stagingAta = await createAccount(
     connection, payer, inputMint, stagingKeypair.publicKey, Keypair.generate()
   );
+
+  // Approve the commitment PDA (derivable from taskId before create_commitment
+  // runs) as delegate for u64::MAX, so recover can pull funds without the staging key.
+  const MAX_U64 = 0xffffffffffffffffn;
+  const [pda] = commitmentPda(Buffer.from(taskId, "hex"));
+  await approve(connection, payer, stagingAta, pda, stagingKeypair, MAX_U64);
+  const check = await getAccount(connection, stagingAta);
+  console.log("staging delegate:", check.delegate ? check.delegate.toBase58() : "(none)", "| delegatedAmount:", check.delegatedAmount.toString());
+  if (!check.delegate || !check.delegate.equals(pda) || check.delegatedAmount !== MAX_U64) {
+    throw new Error("staging delegate readback does not match the commitment PDA / u64::MAX");
+  }
 
   console.log(`swap_staging_ata for task ${taskId}:`, stagingAta.toBase58());
   console.log(`staging authority keypair saved: swap-staging-keypair-${taskId}.json`);

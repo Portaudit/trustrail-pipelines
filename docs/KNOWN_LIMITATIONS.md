@@ -31,14 +31,52 @@ integration.
 
 Once `withdraw_for_swap` succeeds, `escrow_withdrawn` is set to `true` and the
 `Commitment`'s escrow account is empty; the input tokens now live in
-`swap_staging_ata`, owned by a per-commitment staging keypair. If the subsequent
-swap step never executes or never completes (e.g. the swap venue call fails, or the
-worker process crashes between withdrawal and swap), there is currently **no
-recovery instruction** to move those staged funds back into the escrow or return
-them to the original payer. `refund` and `cancel` both correctly guard against this
-state (`require!(!escrow_withdrawn, ...)`), so they fail loudly rather than silently
-sweeping an already-drained escrow account — but there is no path forward for that
-stuck state yet. This is a known, real gap, not yet closed.
+`swap_staging_ata`, owned by a per-commitment staging keypair. By their source,
+`refund` and `cancel` both require `!escrow_withdrawn`, so neither can act on
+this state.
+
+Status as of the program upgrade at slot 507558273 (`trustrail_pipelines`).
+
+### Closed, verified on devnet: FailedSlippage with the escrow withdrawn
+
+The `recover` instruction handles this state. It returns the proceeds left in the
+commitment's output account to the payer and closes the commitment's escrow and
+output accounts. It returns the swap output token only, not the original input,
+so it is recovery of stuck proceeds, not a refund.
+
+It was run once on devnet against Run B (commitment
+`HAi7f8Qf5AsJCSre5ruqMZQ6RchLG6TTuUPKogHMyiPA`), signed by a settler that is not
+the payer. Before: escrow 0, output 300000, staging 0. After: status Recovered,
+escrow and output accounts closed, staging 0, payer output account 300000, payer
+input account unchanged. Recover tx
+`2LZ3VqM99NPCW5bDeSjXxfQVm2P5WvLUpY6Y6CEv4G5UjftGHtPsbTMZWsfb96cK5t2V91LZhbuCWzufahpr4R2C`.
+Run B's five original transactions are unchanged.
+
+### Still open
+
+- **Locked with the escrow withdrawn.** `recover` rejects this state with
+  `WrongState`. Handling it is planned for Slice 2.
+- **Non-empty staging account.** The worker currently creates staging accounts
+  with no delegate, so `recover` cannot pull funds out of a non-empty staging
+  account yet. The litesvm test `recover_rejects_unpullable_staging_atomically`
+  covers the failure case. The Run B recovery had an empty staging account.
+
+### Limits of the evidence
+
+- The litesvm `recover` tests set commitment and token-account states directly.
+  They show how `recover` behaves from those states, not that the real
+  instruction chain reaches them. Only the devnet run on Run B shows that the real
+  chain reaches the FailedSlippage-with-withdrawn state.
+- `release`, `refund` and `cancel` exist in the program but have not been
+  exercised in the litesvm tests or in either documented devnet run (Runs A and B). Runs A and B ended Passed
+  and Recovered.
+
+### Deployed binary
+
+sha256 `7dcd90d415a6e5bf1304b127c64d0a834a4b54934b745d76650b65a20316dee5`. It was
+built locally with `anchor build` at 01:50:11 (+0200) on 2026-10-05 from the
+sources of commit `80c3d18`; no tracked source file had a later modification
+time. This is not a reproducible-build claim.
 
 ## `ProofAlreadyStamped` error variant
 

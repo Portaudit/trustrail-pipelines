@@ -1257,3 +1257,55 @@ fn release_baseline_normal_path_no_dust() {
     assert_eq!(token_amount(&s, &out_ata), out_before + 600_000);
     assert_eq!(token_amount(&s, &s.payer_input_ata), in_before, "input balance must not change");
 }
+
+// ---------------------------------------------------------------------------
+// refund success path (FailedSlippage + escrow not withdrawn). Tests only.
+// Real create_commitment + real submit_proof, no withdraw_for_swap.
+// ---------------------------------------------------------------------------
+
+fn refund_success_case(task_byte: u8, output_amount: u64) {
+    let mut s = setup();
+    ensure_payer_output_ata(&mut s); // once per test (litesvm replay guard)
+    let settler = new_settler(&mut s);
+    let f = stuck_fixture(&mut s, [task_byte; 32], output_amount);
+
+    // setup assertions: failures here are setup, not refund
+    let c = load_commitment(&s, &f.pda);
+    assert_eq!(c.status, CommitmentStatus::FailedSlippage, "setup: not FailedSlippage");
+    assert!(!c.escrow_withdrawn, "setup: escrow_withdrawn set");
+    assert_eq!(token_amount(&s, &f.escrow_ata), LOCK_AMT, "setup: escrow not full");
+    assert_eq!(token_amount(&s, &f.output_ata), output_amount, "setup: output wrong");
+
+    let out_ata = payer_output_ata(&s);
+    let in_before = token_amount(&s, &s.payer_input_ata);
+    let out_before = token_amount(&s, &out_ata);
+
+    refund(&mut s, &settler, &f).expect("refund failed");
+
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Refunded);
+    assert_eq!(token_amount(&s, &s.payer_input_ata), in_before + LOCK_AMT, "payer input delta");
+    assert_eq!(token_amount(&s, &out_ata), out_before + output_amount, "payer output delta");
+    assert!(is_closed(&s, &f.escrow_ata), "escrow not closed");
+    assert!(is_closed(&s, &f.output_ata), "output not closed");
+
+    // second refund: must fail, state unchanged. Error is printed, not named.
+    s.svm.expire_blockhash();
+    let addrs = fx_addrs(&s, &f);
+    let before = snap(&s, &addrs);
+    let err = refund(&mut s, &settler, &f).unwrap_err();
+    println!("second refund error (output_amount={output_amount}): {err}");
+    assert_eq!(before, snap(&s, &addrs), "second refund changed state");
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Refunded);
+}
+
+// (a) output 0: only the escrow is returned.
+#[test]
+fn refund_success_output_zero() {
+    refund_success_case(150, 0);
+}
+
+// (b) output non-zero but below the 500_000 minimum: escrow and output both returned.
+#[test]
+fn refund_success_output_below_min_nonzero() {
+    refund_success_case(151, 300_000);
+}

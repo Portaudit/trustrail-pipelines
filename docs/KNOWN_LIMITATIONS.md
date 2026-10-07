@@ -183,14 +183,15 @@ All signatures below were confirmed finalized. Addresses are commitments.
 
 ### Limits of the evidence
 
-- The litesvm suite (32 tests) sets some state directly. Only the devnet runs
+- The litesvm suite (34 tests) sets some state directly. Only the devnet runs
   show real chain behaviour.
 - `cancel` is exercised in litesvm test B7 and in devnet Run C2. `release` is
   covered by three litesvm tests (a no-dust baseline, the dust variant and the
   output-donation variant) and by two documented devnet releases (Slice 3
-  above). `refund` has no success-path test in litesvm and has not run on
-  devnet; one litesvm test only calls it to show it returns WrongState on a
-  Passed commitment. `refund` is reachable only for FailedSlippage with the
+  above). `refund` is covered by two litesvm success tests (output 0, and
+  output non-zero but below the minimum; a second refund fails with
+  AccountNotInitialized on the closed escrow) and one test that shows it
+  returns WrongState on a Passed commitment. `refund` has not run on devnet. `refund` is reachable only for FailedSlippage with the
   escrow never withdrawn; the normal worker flow withdraws first, so those
   runs exit through `recover`.
 - `recover.ts` and `cancel.ts` refuse a settler equal to the payer. That is a

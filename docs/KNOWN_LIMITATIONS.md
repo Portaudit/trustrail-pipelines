@@ -138,6 +138,12 @@ All signatures below were confirmed finalized. Addresses are commitments.
   deployed Slice 2 binary on devnet (token error 0xb, nothing sent). After the
   Slice 3 upgrade the same account released and the payer received the donated
   unit. A third party could cause this at the cost of one token unit.
+- **`expected_staging_ata` is not validated at creation.** `create_commitment`
+  stores the address the caller passes without checking it, so it can be any
+  account, including one that is not a distinct staging account. `withdraw_for_swap`
+  and `recover` only require the staging account to equal that stored address and
+  to have the input mint. The behaviour when the stored address is the
+  commitment's own escrow account has not been tested. Open.
 - **What Passed means.** Passed attests only that the output account held at
   least the minimum, not that a swap happened.
 - **Legacy commitment accounts.** Three 302-byte commitment accounts on devnet

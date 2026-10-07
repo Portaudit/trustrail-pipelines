@@ -178,8 +178,31 @@ All signatures below were confirmed finalized. Addresses are commitments.
   Finalized): escrow was already 0, payer input unchanged at 1150000, payer
   output 1300000 to 2300000, status Released.
 - The swap in these runs is the disclosed `mock_swap` stand-in, not a real
-  venue. Fifteen older Passed commitments remain unreleased. `refund` has not
-  run on devnet. The fee is a design only and is not implemented.
+  venue. Fifteen older Passed commitments remain unreleased. `refund` ran once on
+  devnet, on a commitment that never reached the swap (see "Refund run"
+  below). The fee is a design only and is not implemented.
+
+### Refund run (devnet, Oct 7)
+
+- This is a refund on a commitment that never reached the swap, not the normal
+  flow: the normal worker flow withdraws the escrow first, so those runs exit
+  through `recover`. It ran against the deployed Slice 3 program.
+- Commitment `FWaLntwjzeroq3FFji7gReXeqM7Wsq1vTf5KgwZWq5DU`, input 1000000,
+  minimum output 500000. `create_commitment` tx
+  `67N3fxP7prYG2Bjs4rHcPYr8CLAngiCm1VhkEvYqXjcFtXTQRPH5wEK6yLPBUmCSzewMv9PVRffGoHJAEUXobrcE`.
+  `withdraw_for_swap` was not called. `submit_proof` tx
+  `5KaYbG1SYaCrBagtb6k2RGwe7jKMinPhozwbnwavLfjqVgDedPzN32e8EGKYW8zVJVuAMurdq6WdEagXDYkJcaYp`
+  claimed 0 against an empty output account, so the status became
+  FailedSlippage with `escrow_withdrawn` false.
+- `refund` (`worker/src/refund.ts`, commit `ea0e445`), signed by the main
+  wallet, tx
+  `3JdMXHRsTJoY7DfthGbdcZhpkDJpzPqcSHnE8q63ky4dJBJDkszJyDzftfUvFVzbk8ANUuVmwBqt7ZHS74Xy9iJc`,
+  slot 508392421, Finalized. Before: escrow 1000000, output 0, payer input
+  1150000, payer output 2300000. After: escrow and output accounts closed,
+  status Refunded, payer input 2150000, payer output 2300000.
+- A second run of the script refused (status Refunded) and sent nothing. The
+  program-level second-refund error (3012, AccountNotInitialized on the closed
+  escrow) was observed in litesvm only.
 
 ### Limits of the evidence
 
@@ -191,7 +214,8 @@ All signatures below were confirmed finalized. Addresses are commitments.
   above). `refund` is covered by two litesvm success tests (output 0, and
   output non-zero but below the minimum; a second refund fails with
   AccountNotInitialized on the closed escrow) and one test that shows it
-  returns WrongState on a Passed commitment. `refund` has not run on devnet. `refund` is reachable only for FailedSlippage with the
+  returns WrongState on a Passed commitment. `refund` ran once on devnet, on a
+  commitment that never reached the swap (see "Refund run" above). `refund` is reachable only for FailedSlippage with the
   escrow never withdrawn; the normal worker flow withdraws first, so those
   runs exit through `recover`.
 - `recover.ts` and `cancel.ts` refuse a settler equal to the payer. That is a

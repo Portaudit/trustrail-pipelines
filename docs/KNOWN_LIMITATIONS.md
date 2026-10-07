@@ -34,8 +34,9 @@ Once `withdraw_for_swap` succeeds, `escrow_withdrawn` is `true` and the
 account. By their source, `refund` and `cancel` both require `!escrow_withdrawn`,
 so neither can act on that state. The `recover` instruction handles it.
 
-Deployed program (devnet): `CgXidrtsV5nLkjPCYhZUPUuZUpmvekMKvDN9uh3ucoC8`, source
-commit `457165a`, last deployed slot 507592632, upgrade tx `3NjV86VemtvZCHYRegmJwvMACcQ7CNHqbYep6HkuoBACKtJhzFE7wSzsfQinpWFJHD84X4nZbUsKo35HnrkrmC4x`. Binary:
+Deployed program (devnet): `CgXidrtsV5nLkjPCYhZUPUuZUpmvekMKvDN9uh3ucoC8`. The
+current deployment is the Slice 3 binary (see "Slice 3" below). The previous
+(Slice 2) deployment was source commit `457165a`, last deployed slot 507592632, upgrade tx `3NjV86VemtvZCHYRegmJwvMACcQ7CNHqbYep6HkuoBACKtJhzFE7wSzsfQinpWFJHD84X4nZbUsKo35HnrkrmC4x`. Binary:
 264880 bytes, sha256
 `c4c5421712552c1c864e85c07539c6fc7297989cdee056bd4ad551aadbbb7e0d`. Provenance is
 by file timestamps and a dump-hash check after the upgrade; this is not a
@@ -95,7 +96,7 @@ All signatures below were confirmed finalized. Addresses are commitments.
   - revoke `33wR5cPPjnjdMBT3uB4fZGBqLwsqKy9DhdgzyUZFwuXWzLE4cz22rCbLDAvBY6rwbnks2kRTBmzZyiuRHr7AeYnf`
   - cancel `CaRXK5SUBowfrbU8zvr3CLtZNfyVBqU8CsfoAjnTtkosyyd1X2YJXgUxM6v8s6bPUCgGyHqbybxyWe4CZux9LfG`
 - **Run D** (`5zrxT6AdAfms6UbYKipi4AVxo4Yp4cXXNmN9RoyPhre2`): the normal path with
-  the delegate in place reached Passed. It was left unreleased on purpose. The
+  the delegate in place reached Passed. It was left unreleased on purpose, then released in Slice 3 (below). The
   `proofTx` field in the decoded account is random bytes, not a transaction.
   - create `LFLceLhx8KCH4CuRft7cgYnivCnZ4GxcQSt9zAbuPFwcmuVBnNtBAed2hKYCd2dxqcexBMCrSAMhoksscuNK1tY`
   - withdraw `22YP1vqJQUtxALj1HoCkoAaaRQsZKdhpX48aaMD5zx8ZPH637CiFkRyHP6ipvY7FjdXHA7ViUBGXKpDfWmiKEPRr`
@@ -121,11 +122,22 @@ All signatures below were confirmed finalized. Addresses are commitments.
   `StagingNotPullable`. Tested in litesvm; the worker always approves `u64::MAX`.
 - **S3 (staging remainder).** After a run reaches Passed or Released, any
   remainder left in the swap staging account stays there. Open.
-- **S4 (donated output forces Passed).** Tokens donated into the output account
-  can push it to the minimum, so `submit_proof` records Passed while the escrow
-  is still non-empty. `release` then fails when it closes the non-empty escrow,
-  so release is locked until Slice 3 (release dust sweep). This is from reading
-  the source and has not been reproduced in a test or on devnet. Open.
+- **S4 (donated output forces Passed).** `submit_proof` never reads the escrow,
+  so tokens donated into the output account can push it to the minimum and the
+  executor's `submit_proof` records Passed while the escrow is still non-empty.
+  Before Slice 3, `release` then failed at the escrow close (token error 0xb)
+  and no other exit remained. Reproduced in litesvm against the pre-sweep
+  program. The `release` sweep now moves any escrow remainder to the payer
+  before the close, covered in litesvm; the output-donation variant has not been
+  reproduced on devnet. Only the executor can call `submit_proof`, so this
+  variant needs the executor or a colluding donor. Closed for `release` by the
+  sweep. Passed still attests nothing about a swap (see below).
+- **Dust variant (closed by the sweep).** After `withdraw_for_swap`, anyone can
+  send one input token to a Passed commitment's escrow account, which made
+  `release` fail at the escrow close. Reproduced in simulation against the
+  deployed Slice 2 binary on devnet (token error 0xb, nothing sent). After the
+  Slice 3 upgrade the same account released and the payer received the donated
+  unit. A third party could cause this at the cost of one token unit.
 - **What Passed means.** Passed attests only that the output account held at
   least the minimum, not that a swap happened.
 - **Legacy commitment accounts.** Three 302-byte commitment accounts on devnet
@@ -133,14 +145,48 @@ All signatures below were confirmed finalized. Addresses are commitments.
   not covered by any recovery claim. It is not claimed that every devnet
   commitment is recoverable.
 
+### Slice 3: release dust sweep (verified on devnet, Oct 7)
+
+- `release` now takes `payer_input_ata` as a trailing eighth account and sweeps
+  any input token left in escrow to the payer before closing it. Program source
+  built from commit `7ede6d0530f984eb6c3ee7d10331e0e35133e872` (its program
+  source is the same as `e17a072`; `7ede6d0` only adds `worker/src/release.ts`).
+  Binary 268368 bytes, sha256
+  `a50c98d07dc0bdaf7aa560d3ff4f2b5246bb2e447f81069e4f61bda96f40a798`, built
+  locally; not a reproducible build.
+- Upgrade tx `43bV1pbL4aXK3zVTjskPsRBQqyFv68KLp8cTyLnBtYYD9JCmaAgBcMiUYnXTnu8wAp6tC8cUiC2M5T1ZEA9Q8EJC`
+  (Finalized), last deployed slot 508283076. A buffer dump matched the sha256
+  before the upgrade; a dump of the deployed program matched it after, with no
+  non-zero padding.
+- Before the upgrade, 1 input token was donated to the escrow of an old Passed
+  commitment (`2UmAP7rZ...`, tx
+  `2LbX5LRuVfyWCPLgkRxJRNADzpKkYuhbQfKjckq79S6noaNNCK1mXeKoU1JgGKG66Ez4d1N5wUgYZhCfYp6pbFG3`).
+  `release.ts` in its legacy 7-account mode simulated against the deployed Slice
+  2 binary and failed at the escrow close, `Custom(11)` (0xb); nothing was sent.
+- After the upgrade, the same commitment was released (slot 508283971, tx
+  `NQ16U67mCyRjnomJWW5AoaMXWkoa3DFFHACE78qmrabVYnJEVc6oXUcGgNDHYsYw8PpYE14i4Wec8YXPDP6mFK6`,
+  Finalized): escrow and output accounts closed, status Released, payer input
+  1149999 to 1150000 (the donated unit), payer output 300000 to 1300000.
+- Run D (`5zrxT6Ad...`) was then released (slot 508284268, tx
+  `2kU4tMx6yU9LGWosVZiXhZ3SiuAq5NvmvBvD99m1FUYMRdXXbYdKdLk5i9YVeKCXJEqrTPx2NWo8xe4bX7a4WrQR`,
+  Finalized): escrow was already 0, payer input unchanged at 1150000, payer
+  output 1300000 to 2300000, status Released.
+- The swap in these runs is the disclosed `mock_swap` stand-in, not a real
+  venue. Fifteen older Passed commitments remain unreleased. `refund` has not
+  run on devnet. The fee is a design only and is not implemented.
+
 ### Limits of the evidence
 
-- The litesvm suite (28 tests) sets some state directly. Only the devnet runs
+- The litesvm suite (32 tests) sets some state directly. Only the devnet runs
   show real chain behaviour.
-- `cancel` is exercised in litesvm test B7 and in devnet Run C2. `refund` and
-  `release` are not exercised in the documented devnet runs. `refund` is
-  reachable only for FailedSlippage with the escrow never withdrawn; the normal
-  worker flow withdraws first, so those runs exit through `recover`.
+- `cancel` is exercised in litesvm test B7 and in devnet Run C2. `release` is
+  covered by three litesvm tests (a no-dust baseline, the dust variant and the
+  output-donation variant) and by two documented devnet releases (Slice 3
+  above). `refund` has no success-path test in litesvm and has not run on
+  devnet; one litesvm test only calls it to show it returns WrongState on a
+  Passed commitment. `refund` is reachable only for FailedSlippage with the
+  escrow never withdrawn; the normal worker flow withdraws first, so those
+  runs exit through `recover`.
 - `recover.ts` and `cancel.ts` refuse a settler equal to the payer. That is a
   script choice, not a program rule.
 - Slot rate was measured at 4.269 slots/s in one 104 s window on Oct 5, not a

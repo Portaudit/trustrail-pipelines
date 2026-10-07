@@ -1,5 +1,19 @@
 # TrustRail — Tier 0 schema memo (locked 2026-09-17, rev 2 2026-09-18)
 
+> **Note (Oct 7, 2026).** This is the original Tier 0 design memo. The
+> implementation differs and the source is authoritative. Differences checked
+> against the source: there is no `verify` instruction (`submit_proof` reads the
+> output account and sets Passed or FailedSlippage itself); the output account
+> is the commitment's associated token account, not a `["out", ...]` PDA;
+> `release` pays the output balance to the payer's output account and sweeps any
+> escrow remainder to the payer's input account, and nothing goes to the
+> executor; `refund` sends escrow to the payer's input account and the output to
+> the payer's output account; `cancel` requires Locked, escrow not withdrawn and
+> a slot strictly after the deadline; the status enum also has `Recovered`; the
+> instructions `withdraw_for_swap` and `recover` exist; `Commitment` also has
+> `escrow_withdrawn` and `expected_staging_ata`; the error list in `error.rs`
+> differs from the list below.
+
 ## Accounts
 - Commitment PDA: seeds=["commitment", task_id]
 - Output ATA: PDA-owned, seeds=["out", commitment, mint]; created at create_commitment;

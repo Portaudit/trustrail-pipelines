@@ -38,9 +38,21 @@ pub struct Release<'info> {
     )]
     pub payer_output_ata: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    // Trailing account (appended last so an old binary ignores it): the sweep
+    // destination for any input token left in escrow.
+    #[account(
+        mut,
+        associated_token::mint = commitment.input_token,
+        associated_token::authority = commitment.payer,
+    )]
+    pub payer_input_ata: Account<'info, TokenAccount>,
 }
 
 pub fn handler(ctx: Context<Release>) -> Result<()> {
+    // Read once, before anything moves. Nothing earlier in this handler touches
+    // escrow, so this is the amount the sweep below transfers.
+    let escrow_amount = ctx.accounts.escrow_ata.amount;
+
     let (task_id, bump) = {
         let c = &mut ctx.accounts.commitment;
         require!(c.status == CommitmentStatus::Passed, TrustRailError::WrongState);
@@ -74,7 +86,25 @@ pub fn handler(ctx: Context<Release>) -> Result<()> {
         signer_seeds,
     ))?;
 
-    // fails loudly if a future swap step left escrow non-empty — see prose above
+    // Sweep any input token left in escrow to the payer before closing it. A
+    // donation (or any other leftover) would otherwise make the close below fail
+    // with a non-zero balance and lock the commitment in Passed. Skipped when 0.
+    if escrow_amount > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                Transfer {
+                    from: ctx.accounts.escrow_ata.to_account_info(),
+                    to: ctx.accounts.payer_input_ata.to_account_info(),
+                    authority: ctx.accounts.commitment.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            escrow_amount,
+        )?;
+    }
+
+    // Escrow is empty here: the sweep above moved whatever was left.
     token::close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.key(),
         CloseAccount {

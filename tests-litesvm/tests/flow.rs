@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 use anchor_lang::prelude::Pubkey;
 use sha2::{Digest, Sha256};
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
@@ -1051,4 +1054,206 @@ fn recover_exact_allowance_donation_fails() {
     assert!(err.to_lowercase().contains("stagingnotpullable"), "got: {err}");
     assert_eq!(before, snap(&s, &addrs));
     assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Locked);
+}
+
+// ---------------------------------------------------------------------------
+// Slice 3: release dust sweep. Tests assert the DESIRED behaviour, so tests 1
+// and 2 are expected to FAIL (red) against the Slice 2 program.
+// release() sends the NEW 8-account list: payer_input_ata is the trailing
+// account. An old binary should treat it as a remaining account.
+// ---------------------------------------------------------------------------
+
+fn release(s: &mut Setup, settler: &Keypair, f: &Fixture) -> Result<(), String> {
+    let accounts = vec![
+        AccountMeta::new_readonly(settler.pubkey(), true),
+        AccountMeta::new(f.pda, false),
+        AccountMeta::new(s.payer.pubkey(), false),
+        AccountMeta::new(f.escrow_ata, false),
+        AccountMeta::new(f.output_ata, false),
+        AccountMeta::new(payer_output_ata(s), false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new(s.payer_input_ata, false), // trailing, new in Slice 3
+    ];
+    let ix = Instruction { program_id: PROGRAM_ID, accounts, data: sighash("release").to_vec() };
+    send(&mut s.svm, settler, ix, &[])
+}
+
+fn refund(s: &mut Setup, settler: &Keypair, f: &Fixture) -> Result<(), String> {
+    let accounts = vec![
+        AccountMeta::new_readonly(settler.pubkey(), true),
+        AccountMeta::new(f.pda, false),
+        AccountMeta::new(s.payer.pubkey(), false),
+        AccountMeta::new(f.escrow_ata, false),
+        AccountMeta::new(f.output_ata, false),
+        AccountMeta::new(s.payer_input_ata, false),
+        AccountMeta::new(payer_output_ata(s), false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+    ];
+    let ix = Instruction { program_id: PROGRAM_ID, accounts, data: sighash("refund").to_vec() };
+    send(&mut s.svm, settler, ix, &[])
+}
+
+// Plain SPL transfer of the input mint from the payer's ATA (a donation).
+fn donate_input(s: &mut Setup, to: &Pubkey, amount: u64) {
+    let ix = spl_token::instruction::transfer(
+        &spl_token::ID, &s.payer_input_ata, to, &s.payer.pubkey(), &[], amount,
+    )
+    .unwrap();
+    send(&mut s.svm, &s.payer, ix, &[]).expect("input donation failed");
+}
+
+// SPL token error 11 (NonNativeHasBalance). PREDICTION until red output is pasted.
+fn is_non_native_has_balance(err: &str) -> bool {
+    err.contains("Custom(11)") || err.contains("custom program error: 0xb\"")
+}
+
+fn expect_wrong_state(r: Result<(), String>, who: &str) {
+    match r {
+        Ok(()) => panic!("{who}: unexpectedly succeeded"),
+        Err(e) => assert!(e.to_lowercase().contains("wrongstate"), "{who}: expected WrongState, got: {e}"),
+    }
+}
+
+// Calls release and panics with a diagnostic if the TX fails. Setup is done by
+// the caller, so a failure here is on the release transaction itself.
+fn release_expect_ok(s: &mut Setup, settler: &Keypair, f: &Fixture, label: &str) {
+    let addrs = fx_addrs(s, f);
+    let before = snap(s, &addrs);
+    if let Err(e) = release(s, settler, f) {
+        let unchanged = before == snap(s, &addrs);
+        let status = load_commitment(s, &f.pda).status;
+        panic!(
+            "{label}: RELEASE TX FAILED (lock-up). predicted NonNativeHasBalance(0xb) = {} | state unchanged = {} | status = {:?} | err = {}",
+            is_non_native_has_balance(&e), unchanged, status, e
+        );
+    }
+}
+
+// Test 1 (S4, output donation). Expected today: FAIL on the release TX.
+// Passed + escrow_withdrawn=false + full escrow (no withdraw ran). The output
+// account is pushed to the minimum by a donation; submit_proof never reads escrow.
+#[test]
+fn release_s4_output_donation_lockup() {
+    let mut s = setup();
+    ensure_payer_output_ata(&mut s);
+    let settler = new_settler(&mut s);
+    let (f, _owner) = locked_fixture(&mut s, [140u8; 32], 100);
+    fund_output_ata(&mut s, &f.output_ata, 500_000);
+    submit_proof(&mut s, f.pda, f.output_ata, 500_000).unwrap();
+
+    let c = load_commitment(&s, &f.pda);
+    assert_eq!(c.status, CommitmentStatus::Passed, "setup: not Passed");
+    assert!(!c.escrow_withdrawn, "setup: escrow_withdrawn set");
+    assert_eq!(token_amount(&s, &f.escrow_ata), LOCK_AMT, "setup: escrow not full");
+    assert_eq!(token_amount(&s, &f.output_ata), 500_000, "setup: output wrong");
+
+    // No other exit: refund, cancel, recover all return WrongState with valid
+    // account lists, past the deadline, and change nothing.
+    s.svm.warp_to_slot(101);
+    let addrs = fx_addrs(&s, &f);
+    let before = snap(&s, &addrs);
+    expect_wrong_state(refund(&mut s, &settler, &f), "refund");
+    expect_wrong_state(cancel(&mut s, &settler, &f), "cancel");
+    expect_wrong_state(recover(&mut s, &settler, &f), "recover");
+    assert_eq!(before, snap(&s, &addrs), "exit attempts changed state");
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Passed);
+
+    // Desired: release ends Released and the payer holds everything.
+    let in_before = token_amount(&s, &s.payer_input_ata);
+    let out_ata = payer_output_ata(&s);
+    let out_before = token_amount(&s, &out_ata);
+    release_expect_ok(&mut s, &settler, &f, "S4 output donation");
+
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Released);
+    assert!(is_closed(&s, &f.escrow_ata));
+    assert!(is_closed(&s, &f.output_ata));
+    assert_eq!(token_amount(&s, &s.payer_input_ata), in_before + LOCK_AMT);
+    assert_eq!(token_amount(&s, &out_ata), out_before + 500_000);
+}
+
+// Test 2 (dust variant). Expected today: FAIL on the release TX.
+// Real withdraw_for_swap, then 1 input token donated into escrow.
+#[test]
+fn release_dust_in_escrow_lockup() {
+    let mut s = setup();
+    ensure_payer_output_ata(&mut s);
+    let settler = new_settler(&mut s);
+    let (f, owner) = locked_fixture(&mut s, [141u8; 32], 100);
+    approve_delegate(&mut s, &f.staging_kp.pubkey(), &owner, &f.pda, u64::MAX);
+    withdraw_for_swap(&mut s, &settler, &f).unwrap();
+    donate_input(&mut s, &f.escrow_ata, 1);
+    let pool = make_pool(&mut s);
+    simulate_swap(&mut s, &f, &owner, &pool, LOCK_AMT, 500_000);
+    submit_proof(&mut s, f.pda, f.output_ata, 500_000).unwrap();
+
+    let c = load_commitment(&s, &f.pda);
+    assert_eq!(c.status, CommitmentStatus::Passed, "setup: not Passed");
+    assert!(c.escrow_withdrawn, "setup: escrow_withdrawn not set");
+    assert_eq!(token_amount(&s, &f.escrow_ata), 1, "setup: dust missing");
+    assert_eq!(token_amount(&s, &f.staging_kp.pubkey()), 0, "setup: staging not empty");
+
+    let in_before = token_amount(&s, &s.payer_input_ata);
+    let out_ata = payer_output_ata(&s);
+    let out_before = token_amount(&s, &out_ata);
+    release_expect_ok(&mut s, &settler, &f, "dust variant");
+
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Released);
+    assert!(is_closed(&s, &f.escrow_ata));
+    assert!(is_closed(&s, &f.output_ata));
+    assert_eq!(token_amount(&s, &s.payer_input_ata), in_before + 1, "payer did not get the dust");
+    assert_eq!(token_amount(&s, &out_ata), out_before + 500_000);
+}
+
+// Test 3 (precedence). Expected today: PASS (state checks run before the guard).
+// After a real withdraw, dust in escrow and a revoked delegate would trip
+// StagingNotPullable if the guard ran first. EscrowAlreadyWithdrawn must win.
+#[test]
+fn withdraw_for_swap_second_call_hits_state_check_before_staging_guard() {
+    let mut s = setup();
+    let settler = new_settler(&mut s);
+    let (f, owner) = locked_fixture(&mut s, [142u8; 32], 100);
+    approve_delegate(&mut s, &f.staging_kp.pubkey(), &owner, &f.pda, u64::MAX);
+    withdraw_for_swap(&mut s, &settler, &f).unwrap();
+    donate_input(&mut s, &f.escrow_ata, 1);
+    revoke_delegate(&mut s, &f.staging_kp.pubkey(), &owner);
+    assert_eq!(token_amount(&s, &f.escrow_ata), 1, "setup: dust missing");
+
+    let addrs = fx_addrs(&s, &f);
+    let before = snap(&s, &addrs);
+    s.svm.expire_blockhash(); // identical ix would otherwise be AlreadyProcessed
+    let err = withdraw_for_swap(&mut s, &settler, &f).unwrap_err();
+    let e = err.to_lowercase();
+    assert!(e.contains("escrowalreadywithdrawn"), "got: {err}");
+    assert!(!e.contains("stagingnotpullable"), "got: {err}");
+    assert_eq!(before, snap(&s, &addrs), "state changed");
+}
+
+// Test 4 (BASELINE, first litesvm release test). Normal Passed release, no dust.
+// Real create_commitment, real withdraw_for_swap, simulated swap of the full
+// input, real submit_proof. Uses the 8-account list.
+#[test]
+fn release_baseline_normal_path_no_dust() {
+    let mut s = setup();
+    ensure_payer_output_ata(&mut s);
+    let settler = new_settler(&mut s);
+    let (f, owner) = locked_fixture(&mut s, [143u8; 32], 100);
+    approve_delegate(&mut s, &f.staging_kp.pubkey(), &owner, &f.pda, u64::MAX);
+    withdraw_for_swap(&mut s, &settler, &f).unwrap();
+    let pool = make_pool(&mut s);
+    simulate_swap(&mut s, &f, &owner, &pool, LOCK_AMT, 600_000);
+    submit_proof(&mut s, f.pda, f.output_ata, 600_000).unwrap();
+
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Passed, "setup: not Passed");
+    assert_eq!(token_amount(&s, &f.escrow_ata), 0, "setup: escrow not empty");
+
+    let in_before = token_amount(&s, &s.payer_input_ata);
+    let out_ata = payer_output_ata(&s);
+    let out_before = token_amount(&s, &out_ata);
+    release_expect_ok(&mut s, &settler, &f, "baseline");
+
+    assert_eq!(load_commitment(&s, &f.pda).status, CommitmentStatus::Released);
+    assert!(is_closed(&s, &f.escrow_ata));
+    assert!(is_closed(&s, &f.output_ata));
+    assert_eq!(token_amount(&s, &out_ata), out_before + 600_000);
+    assert_eq!(token_amount(&s, &s.payer_input_ata), in_before, "input balance must not change");
 }

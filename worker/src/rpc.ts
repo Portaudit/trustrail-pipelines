@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 import { Connection } from "@solana/web3.js";
 
 const DEFAULT_RPC = "https://api.devnet.solana.com";

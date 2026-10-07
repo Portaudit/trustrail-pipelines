@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 // Per-run: creates the staging account BEFORE create_commitment is called,
 // then later — after withdraw_for_swap has moved funds into staging —
 // executes mock_swap_execute: staging -> pool -> output_ata.

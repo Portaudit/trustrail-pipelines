@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 import { getConnection } from "./rpc";
 import { createHash } from "crypto";
 import { PublicKey } from "@solana/web3.js";

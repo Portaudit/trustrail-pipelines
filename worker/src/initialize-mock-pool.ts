@@ -1,3 +1,6 @@
+// Copyright 2026 Ishvir and Company (Pty) Ltd
+// SPDX-License-Identifier: Apache-2.0
+
 import { getConnection } from "./rpc";
 // One-time setup: creates the mock pool's vaults and seeds output liquidity.
 // Run ONCE, AFTER create-commitment.ts has run at least once (that's what
